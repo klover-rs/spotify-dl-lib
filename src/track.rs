@@ -58,6 +58,8 @@ fn parse_url(track_url: &str) -> Option<SpotifyId> {
 #[derive(Clone, Debug)]
 pub struct Track {
     pub id: SpotifyId,
+    pub playlist_id: Option<SpotifyId>,
+    pub album_id: Option<SpotifyId>,
 }
 
 lazy_static! {
@@ -69,12 +71,20 @@ impl Track {
     #[allow(dead_code)]
     pub fn new(track: &str) -> Result<Self> {
         let id = parse_uri_or_url(track).ok_or(anyhow::anyhow!("Invalid track"))?;
-        Ok(Track { id })
+        Ok(Track { id, playlist_id: None, album_id: None })
     }
 
     pub fn from_id(id: SpotifyId) -> Self {
-        Track { id }
+        Track { id, playlist_id: None, album_id: None }
     }
+
+    pub fn from_playlist(id: SpotifyId, playlist_id: SpotifyId) -> Self {
+        Track { id, playlist_id: Some(playlist_id), album_id: None }
+    }
+
+    pub fn from_album(id: SpotifyId, album_id: SpotifyId) -> Self {
+        Track { id, playlist_id: None, album_id: Some(album_id) }
+    } 
 
     pub async fn metadata(&self, session: &Session) -> Result<TrackMetadata> {
         let metadata = librespot::metadata::Track::get(session, self.id)
@@ -134,7 +144,7 @@ impl TrackCollection for Album {
         album
             .tracks
             .iter()
-            .map(|track| Track::from_id(*track))
+            .map(|track| Track::from_album(*track, self.id))
             .collect()
     }
 }
@@ -164,13 +174,14 @@ impl Playlist {
 #[async_trait::async_trait]
 impl TrackCollection for Playlist {
     async fn get_tracks(&self, session: &Session) -> Vec<Track> {
-        let playlist = librespot::metadata::Playlist::get(session, self.id)
+        let playlist: librespot::metadata::Playlist = librespot::metadata::Playlist::get(session, self.id)
             .await
             .expect("Failed to get playlist");
+
         playlist
             .tracks
             .iter()
-            .map(|track| Track::from_id(*track))
+            .map(|track| Track::from_playlist(*track, self.id))
             .collect()
     }
 }

@@ -10,10 +10,13 @@ use indicatif::ProgressBar;
 use indicatif::ProgressState;
 use indicatif::ProgressStyle;
 use librespot::core::session::Session;
+use librespot::core::spotify_id::SpotifyId;
+use librespot::metadata::Metadata;
 use librespot::playback::config::PlayerConfig;
 use librespot::playback::mixer::NoOpVolume;
 use librespot::playback::mixer::VolumeGetter;
 use librespot::playback::player::Player;
+
 
 use crate::channel_sink::ChannelSink;
 use crate::encoder::Format;
@@ -80,13 +83,45 @@ impl<'a> Downloader<'a> {
         tracing::info!("Downloading track: {:?}", metadata);
 
         let file_name = self.get_file_name(&metadata);
-        let path = options
-            .destination
-            .join(file_name.clone())
-            .with_extension(options.format.extension())
-            .to_str()
-            .ok_or(anyhow::anyhow!("Could not set the output path"))?
-            .to_string();
+
+        
+        let mut path = String::new();
+
+
+        if let Some(playlist) = track.playlist_id {
+
+            let playlist_name = self.playlist_name(playlist, self.session).await?;
+
+            path.push_str(options
+                .destination
+                .join(playlist_name)
+                .join(file_name.clone())
+                .with_extension(options.format.extension())
+                .to_str()
+                .ok_or(anyhow::anyhow!("Could not set the output path"))?
+                .to_string().as_str());
+        } else if let Some(album) = track.album_id {
+            let album_name = self.album_name(album, self.session).await?;
+
+            path.push_str(options
+                .destination
+                .join(album_name)
+                .join(file_name.clone())
+                .with_extension(options.format.extension())
+                .to_str()
+                .ok_or(anyhow::anyhow!("Could not set the output path"))?
+                .to_string().as_str());
+        } else {
+            path.push_str(
+                options
+                .destination
+                .join(file_name.clone())
+                .with_extension(options.format.extension())
+                .to_str()
+                .ok_or(anyhow::anyhow!("Could not set the output path"))?
+                .to_string().as_str()
+            );
+        }
 
         let (sink, mut sink_channel) = ChannelSink::new(metadata);
 
@@ -185,5 +220,49 @@ impl<'a> Downloader<'a> {
             }
         }
         clean
+    }
+
+    async fn playlist_name(&self, id: SpotifyId, session: &Session) -> Result<String> {
+        let playlist = librespot::metadata::Playlist::get(session, id)
+            .await.unwrap();
+
+        let playlist_name = playlist.name;
+        let playlist_creator = playlist.user;
+
+        Ok(self.clean_file_name(format!("{} - {}", playlist_creator, playlist_name)))
+            
+    }
+
+    async fn album_name(&self, id: SpotifyId, session: &Session) -> Result<String> {
+        let album: librespot::metadata::Album = librespot::metadata::Album::get(session, id)
+            .await.unwrap();
+
+        let album_name: String = album.name;
+        let album_artist_vec: Vec<SpotifyId> = album.artists;
+
+        let mut artists_string: String = String::new();
+
+        for (i, artist_id) in album_artist_vec.iter().enumerate() {
+            if i >= 3 {
+                artists_string.push_str("and others...");
+                break;
+            }
+            let artist_str = self.convert_artist_to_string(artist_id.clone(), session).await.unwrap();
+            artists_string.push_str(&format!("{}, ", artist_str));
+        }
+
+        if artists_string.ends_with(", ") {
+            artists_string.truncate(artists_string.len() - 2);
+        }
+
+        Ok(self.clean_file_name(format!("{} - {}", artists_string, album_name)))
+        
+    }
+
+    async fn convert_artist_to_string(&self, id: SpotifyId, session: &Session) -> Result<String> {
+        let artist = librespot::metadata::Artist::get(session, id)
+            .await.unwrap();
+
+        Ok(artist.name)
     }
 }
