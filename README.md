@@ -21,7 +21,7 @@ A rust library which allows you to download spotify songs if you have a __premiu
 add this to your Cargo.toml 
 ```toml
 [dependencies]
-spotify_dl_lib = { path = "../spotify-dl", features = ["mp3"] }
+spotify_dl_lib = { path = "../spotify-dl-lib", features = ["mp3"] }
 ```
 > add the mp3 feature if you need it, it wont make the file size smaller ( for now ;) 
 
