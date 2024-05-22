@@ -23,7 +23,7 @@ use crate::encoder::Format;
 use crate::encoder::Samples;
 use crate::channel_sink::SinkEvent;
 use crate::track::Track;
-use crate::track::TrackMetadata;
+
 
 pub struct Downloader<'a> {
     player_config: PlayerConfig,
@@ -82,7 +82,7 @@ impl<'a> Downloader<'a> {
         let metadata = track.metadata(&self.session).await?;
         tracing::info!("Downloading track: {:?}", metadata);
 
-        let file_name = self.get_file_name(&metadata);
+        let file_name = self.get_file_name(&track).await;
 
         
         let mut path = String::new();
@@ -90,7 +90,7 @@ impl<'a> Downloader<'a> {
 
         if let Some(playlist) = track.playlist_id {
 
-            let playlist_name = self.playlist_name(playlist, self.session).await?;
+            let playlist_name = self.playlist_name(playlist).await?;
 
             path.push_str(options
                 .destination
@@ -101,7 +101,7 @@ impl<'a> Downloader<'a> {
                 .ok_or(anyhow::anyhow!("Could not set the output path"))?
                 .to_string().as_str());
         } else if let Some(album) = track.album_id {
-            let album_name = self.album_name(album, self.session).await?;
+            let album_name = self.album_name(album).await?;
 
             path.push_str(options
                 .destination
@@ -182,7 +182,11 @@ impl<'a> Downloader<'a> {
         Box::new(NoOpVolume)
     }
 
-    fn get_file_name(&self, metadata: &TrackMetadata) -> String {
+    async fn get_file_name(&self, track: &Track) -> String {
+
+        let metadata = track.metadata(self.session).await.unwrap();
+        let base62_id = track.id.to_base62().unwrap();
+
         // If there is more than 3 artists, add the first 3 and add "and others" at the end
         if metadata.artists.len() > 3 {
             let artists_name = metadata
@@ -193,8 +197,8 @@ impl<'a> Downloader<'a> {
                 .collect::<Vec<String>>()
                 .join(", ");
             return self.clean_file_name(format!(
-                "{}, and others - {}",
-                artists_name, metadata.track_name
+                "{}, and others - {} - {}",
+                artists_name, metadata.track_name, base62_id
             ));
         }
 
@@ -204,7 +208,7 @@ impl<'a> Downloader<'a> {
             .map(|artist| artist.name.clone())
             .collect::<Vec<String>>()
             .join(", ");
-        self.clean_file_name(format!("{} - {}", artists_name, metadata.track_name))
+        self.clean_file_name(format!("{} - {} - {}", artists_name, metadata.track_name, base62_id))
     }
 
     fn clean_file_name(&self, file_name: String) -> String {
@@ -222,23 +226,25 @@ impl<'a> Downloader<'a> {
         clean
     }
 
-    async fn playlist_name(&self, id: SpotifyId, session: &Session) -> Result<String> {
-        let playlist = librespot::metadata::Playlist::get(session, id)
+    async fn playlist_name(&self, id: SpotifyId) -> Result<String> {
+        let playlist = librespot::metadata::Playlist::get(self.session, id)
             .await.unwrap();
 
         let playlist_name = playlist.name;
         let playlist_creator = playlist.user;
+        let base62_id = id.to_base62().unwrap();
 
-        Ok(self.clean_file_name(format!("{} - {}", playlist_creator, playlist_name)))
+        Ok(self.clean_file_name(format!("{} - {} - {}", playlist_creator, playlist_name, base62_id)))
             
     }
 
-    async fn album_name(&self, id: SpotifyId, session: &Session) -> Result<String> {
-        let album: librespot::metadata::Album = librespot::metadata::Album::get(session, id)
+    async fn album_name(&self, id: SpotifyId) -> Result<String> {
+        let album: librespot::metadata::Album = librespot::metadata::Album::get(self.session, id)
             .await.unwrap();
 
         let album_name: String = album.name;
         let album_artist_vec: Vec<SpotifyId> = album.artists;
+        let base62_id = id.to_base62().unwrap();
 
         let mut artists_string: String = String::new();
 
@@ -247,7 +253,7 @@ impl<'a> Downloader<'a> {
                 artists_string.push_str("and others...");
                 break;
             }
-            let artist_str = self.convert_artist_to_string(artist_id.clone(), session).await.unwrap();
+            let artist_str = self.convert_artist_to_string(artist_id.clone(), self.session).await.unwrap();
             artists_string.push_str(&format!("{}, ", artist_str));
         }
 
@@ -255,7 +261,7 @@ impl<'a> Downloader<'a> {
             artists_string.truncate(artists_string.len() - 2);
         }
 
-        Ok(self.clean_file_name(format!("{} - {}", artists_string, album_name)))
+        Ok(self.clean_file_name(format!("{} - {} - {}", artists_string, album_name, base62_id)))
         
     }
 
