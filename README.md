@@ -3,32 +3,10 @@ A rust library which allows you to download spotify songs if you have a __premiu
 
 ## Features
 - Download tracks, albums, and playlists
-- Supports mp3 and flac formats
+- Supports mp3 (enable the mp3 feature) and flac format
 - Configurable download concurrency and compression (compression only applies to flac!)
 
 ## How to use this library
-
-### how to add the library to your cargo
-
-(expecting your directory tree looks like this or similar)
-```
-├───libtester
-│   └───src
-├───spotify-dl-lib
-    ├───src
-        └───encoder
-```
-add this to your Cargo.toml 
-```toml
-[dependencies]
-spotify_dl_lib = { path = "../spotify-dl-lib", features = ["mp3"] }
-```
-> add the mp3 feature if you need it, it wont make the file size smaller ( for now ;) 
-
-and yea the obvious, please do not forget to actually clone or download the repo :D
-
-### prerequisites 
-- [rust language](https://www.rust-lang.org/tools/install)
 
 get your spotify username (**your username is not your display name**) and password ready
 
