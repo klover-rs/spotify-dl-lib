@@ -48,5 +48,8 @@ async fn main() {
 }
 ```
 
+## Important!!
+Using this project is against Spotifys ToS, use it at your own risk. I am not responsible for any damanges/limitations caused to your Spotify Account.
+
 ## Credits
 This project was only possible due of the existence of [this amazing project](https://github.com/GuillemCastro/spotify-dl) <3 much love to all of you. If you are looking for a CLI solution for just downloading spotify tracks, stick to the mentioned project instead. 
