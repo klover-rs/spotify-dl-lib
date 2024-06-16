@@ -1,5 +1,6 @@
 use std::fmt::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -16,24 +17,31 @@ use librespot::playback::config::PlayerConfig;
 use librespot::playback::mixer::NoOpVolume;
 use librespot::playback::mixer::VolumeGetter;
 use librespot::playback::player::Player;
+use tokio::sync::Mutex;
+use tokio::time::sleep;
 
+
+use serde::{Serialize, Deserialize};
 
 use crate::channel_sink::ChannelSink;
 use crate::encoder::Format;
 use crate::encoder::Samples;
 use crate::channel_sink::SinkEvent;
 use crate::track::Track;
+use crate::DownloadState;
 
 
 pub struct Downloader<'a> {
     player_config: PlayerConfig,
     session: &'a Session,
     progress_bar: MultiProgress,
+    state: Arc<Mutex<DownloadState>>
 }
 
 #[derive(Debug, Clone)]
 pub struct DownloadOptions {
     pub destination: PathBuf,
+    #[allow(dead_code)]
     pub compression: Option<u32>,
     pub parallel: usize,
     pub format: Format,
@@ -52,12 +60,31 @@ impl DownloadOptions {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+enum Action {
+    Downloading { 
+        file_name: String,
+        downloaded_bytes: usize,
+        total_bytes: usize 
+    },
+    Encoding { 
+        file_name: String
+    },
+    Writing {
+        file_name: String
+    },
+    Downloaded {
+        file_name: String
+    }
+}
+
 impl<'a> Downloader<'a> {
-    pub fn new(session: &'a Session) -> Self {
+    pub fn new(session: &'a Session, state: Arc<Mutex<DownloadState>>) -> Self {
         Downloader {
             player_config: PlayerConfig::default(),
             session,
             progress_bar: MultiProgress::new(),
+            state,
         }
     }
 
@@ -83,6 +110,7 @@ impl<'a> Downloader<'a> {
         tracing::info!("Downloading track: {:?}", metadata);
 
         let file_name = self.get_file_name(&track).await;
+        let file_name_clone = file_name.clone();
 
         
         let mut path = String::new();
@@ -95,7 +123,7 @@ impl<'a> Downloader<'a> {
             path.push_str(options
                 .destination
                 .join(playlist_name)
-                .join(file_name.clone())
+                .join(file_name_clone.clone())
                 .with_extension(options.format.extension())
                 .to_str()
                 .ok_or(anyhow::anyhow!("Could not set the output path"))?
@@ -106,7 +134,7 @@ impl<'a> Downloader<'a> {
             path.push_str(options
                 .destination
                 .join(album_name)
-                .join(file_name.clone())
+                .join(file_name_clone.clone())
                 .with_extension(options.format.extension())
                 .to_str()
                 .ok_or(anyhow::anyhow!("Could not set the output path"))?
@@ -115,7 +143,7 @@ impl<'a> Downloader<'a> {
             path.push_str(
                 options
                 .destination
-                .join(file_name.clone())
+                .join(file_name_clone.clone())
                 .with_extension(options.format.extension())
                 .to_str()
                 .ok_or(anyhow::anyhow!("Could not set the output path"))?
@@ -139,6 +167,47 @@ impl<'a> Downloader<'a> {
         pb.set_style(ProgressStyle::with_template("{spinner:.green} {msg} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")?
             .with_key("eta", |state: &ProgressState, w: &mut dyn Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
             .progress_chars("#>-"));
+
+        let filename_clone_of_clone = file_name.clone();
+        let message = Arc::new(Mutex::new(Action::Downloading {
+            file_name: file_name.clone(),
+            downloaded_bytes: 0,
+            total_bytes: 0
+        }));
+        drop(filename_clone_of_clone);
+
+       
+        let stop_flag = Arc::new(Mutex::new(false));
+
+        let message_clone = Arc::clone(&message);
+        let stop_flag_clone = Arc::clone(&stop_flag);
+
+        let sender = self.state.lock().await.sender.clone();
+
+        tokio::spawn(async move {
+            loop {
+                let msg: Action;
+                {
+                    let guard = message_clone.lock().await;
+                    msg = guard.clone();
+                }
+
+                let as_json_str = serde_json::to_string(&msg).unwrap();
+
+                if let Err(e) = sender.send(crate::DownloadStateOpts::MessageSender(as_json_str)) {
+                    tracing::error!("Error sending message via websocket: {:?}", e);
+                }
+
+                {
+                    let stop_flag = stop_flag_clone.lock().await;
+                    if *stop_flag {
+                        break;
+                    }
+                }
+                sleep(Duration::from_millis(500)).await;
+            }
+        });
+
         pb.set_message(file_name.clone());
 
         player.load(track.id, true, 0);
@@ -151,10 +220,19 @@ impl<'a> Downloader<'a> {
         });
 
         while let Some(event) = sink_channel.recv().await {
+    
             match event {
                 SinkEvent::Write { bytes, total, mut content } => {
                     tracing::trace!("Written {} bytes out of {}", bytes, total);
                     pb.set_position(bytes as u64);
+                    {
+                        let mut msg = message.lock().await;
+                        *msg = Action::Downloading {
+                            file_name: file_name_clone.clone(),
+                            downloaded_bytes: bytes,
+                            total_bytes: total
+                        };
+                    }
                     samples.append(&mut content);
                 }
                 SinkEvent::Finished => {
@@ -162,19 +240,34 @@ impl<'a> Downloader<'a> {
                     break;
                 }
             }
+            
         }
 
-        tracing::info!("Encoding track: {:?}", file_name);
-        pb.set_message(format!("Encoding {}", &file_name));
+        tracing::info!("Encoding track: {:?}", &file_name_clone);
+        pb.set_message(format!("Encoding {}", &file_name_clone));
+        {
+            let mut msg = message.lock().await;
+            *msg = Action::Encoding { file_name: file_name_clone.clone() }
+        }
         let samples = Samples::new(samples, 44100, 2, 16);
         let encoder = crate::encoder::get_encoder(options.format);
         let stream = encoder.encode(samples).await?;
 
         pb.set_message(format!("Writing {}", &file_name));
+        {
+            let mut msg = message.lock().await;
+            *msg = Action::Writing { file_name: file_name_clone.clone() }
+        }
         tracing::info!("Writing track: {:?} to file: {}", file_name, &path);
         stream.write_to_file(&path).await?;
 
         pb.finish_with_message(format!("Downloaded {}", &file_name));
+        {
+            let mut msg = message.lock().await;
+            let mut stop_flag = stop_flag.lock().await;
+            *msg = Action::Downloaded { file_name: file_name_clone.clone() };
+            *stop_flag = true;
+        }
         Ok(())
     }
 
