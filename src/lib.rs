@@ -1,9 +1,9 @@
-use std::{fs, future::IntoFuture, sync::Arc, time::Duration};
+use std::{fs, sync::Arc, time::Duration};
 use anyhow::Result;
 use axum::{extract::{ws::{Message, WebSocket}, WebSocketUpgrade}, response::IntoResponse, routing::get, Router};
 use download::DownloadOptions;
 use librespot::core::session::Session;
-use tokio::{sync::{broadcast, Mutex}, task::JoinHandle};
+use tokio::sync::{broadcast, Mutex};
 
 
 mod session;
