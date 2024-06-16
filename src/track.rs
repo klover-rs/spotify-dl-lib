@@ -190,6 +190,7 @@ impl TrackCollection for Playlist {
 pub struct TrackMetadata {
     pub artists: Vec<ArtistMetadata>,
     pub track_name: String,
+    #[allow(dead_code)]
     pub album: AlbumMetadata,
     pub duration: i32,
 }
@@ -230,6 +231,7 @@ impl From<librespot::metadata::Artist> for ArtistMetadata {
 
 #[derive(Clone, Debug)]
 pub struct AlbumMetadata {
+    #[allow(dead_code)]
     pub name: String,
 }
 
