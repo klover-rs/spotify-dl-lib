@@ -12,7 +12,7 @@ structopt = { version = "0.3", default-features = false }
 rpassword = "7.0"
 indicatif = "0.17"
 librespot = { version = "0.4.2", default-features = false }
-tokio = { version = "1", features = ["full", "tracing"] }
+tokio = { version = "1.36.0", features = ["full", "tracing"] }
 flacenc = "0.4"
 audiotags = "0.5"
 regex = "1.7.1"
@@ -26,7 +26,13 @@ dirs = "5.0"
 mp3lame-encoder = { version = "0.1.5", optional = true }
 futures = "0.3"
 rayon = "1.10"
+axum = {version="0.7.4", features = ["ws"]}
+serde_json = "1.0.117"
+serde = { version = "1.0.203", features = ["derive"] }
+
 
 [features]
 default = ["mp3"]
+
+
 mp3 = ["dep:mp3lame-encoder"]
