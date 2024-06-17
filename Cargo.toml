@@ -8,8 +8,6 @@ license = "MIT"
 keywords = ["spotify", "spotifydownloader"]
 
 [dependencies]
-structopt = { version = "0.3", default-features = false }
-rpassword = "7.0"
 indicatif = "0.17"
 librespot = { version = "0.4.2", default-features = false }
 tokio = { version = "1.36.0", features = ["full", "tracing"] }
