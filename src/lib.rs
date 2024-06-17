@@ -1,4 +1,4 @@
-use std::{fs, sync::Arc, time::Duration};
+use std::{fs, path::PathBuf, sync::Arc, time::Duration};
 use anyhow::Result;
 use axum::{extract::{ws::{Message, WebSocket}, WebSocketUpgrade}, response::IntoResponse, routing::get, Router};
 use download::DownloadOptions;
@@ -23,24 +23,15 @@ lazy_static::lazy_static! {
     static ref STOP_FLAG: Mutex<bool> = Mutex::new(false);
 }
 
-fn create_output_folder(folder_name: &str) -> Result<String> {
-
-    
-
-    if let Some(home_dir) = dirs::home_dir() {
-        let folder_path = home_dir.join(folder_name);
-
-        if !folder_path.exists() {
-            fs::create_dir(&folder_path)?;
-        }
-
-        let data_folder = folder_path.to_string_lossy().into_owned();
-        Ok(data_folder)
-    } else {
-        anyhow::bail!("Home directory not found");
+fn destination_folder(folder_path: PathBuf) -> Result<String> {
+    if !folder_path.exists() {
+        fs::create_dir(&folder_path)?;
     }
-}
 
+    let folder_str = folder_path.to_string_lossy().into_owned();
+
+    Ok(folder_str)
+}
 
 #[derive(Debug, Clone)]
 pub enum DownloadStateOpts {
@@ -107,12 +98,12 @@ pub struct SpotifyDownloader {
 
 impl SpotifyDownloader {
     pub async fn new(
-        output_folder_name: &str, 
+        output_folder_name: PathBuf, 
         username: &str, 
         password: &str,
     ) -> Result<Self> {
 
-        let output_folder = create_output_folder(&output_folder_name)?;
+        let output_folder = destination_folder(output_folder_name)?;
 
         let session = create_session(&username, &password).await?;
 
