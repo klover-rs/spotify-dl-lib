@@ -17,6 +17,9 @@ in case you do not know how to get your spotify username here is a quick tutoria
 3. and now you should have your spotify profile url in your clipboard, in my case, this is my profile url: https://open.spotify.com/user/xfvf8ol1ezj9bv5la7ty0vzut?si=8a8b7c4b7c5746df
 4. this is the important part we need from the url: **xfvf8ol1ezj9bv5la7ty0vzut**, save this for later
 
+if your application uses a UI, a websocket server is exposed at ws://127.0.0.1:4040 :))
+an example project will be very soon coming on my github which uses this websocket :D
+
 ### example 
 ```rs
 use spotify_dl_lib::SpotifyDownloader;
@@ -26,8 +29,10 @@ async fn main() {
     let username = "your username here";
     let password = "your spotify password here";
 
+    let output_folder = PathBuf::from("./spotify-dl-data")
+
     //first argument is the name of the folder, where your mp3 files will be dropped (folder will be created in your home dir)
-    let spotify_dl = SpotifyDownloader::new(&"spotify-dl-data", &username, &password).await.unwrap();
+    let spotify_dl = SpotifyDownloader::new(&output_folder, &username, &password).await.unwrap();
 
     //download a playlist, album or track!
     let tracks_to_dl = vec![
