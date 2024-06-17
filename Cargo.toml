@@ -5,7 +5,7 @@ edition = "2021"
 description = "A rust library which allows you to download spotify songs if you have a premium account"
 repository = "https://github.com/mari-rs/spotify-dl-lib"
 license = "MIT"
-keywords = ["spotify", "spotifydownloader", "i<3poland"]
+keywords = ["spotify", "spotifydownloader"]
 
 [dependencies]
 structopt = { version = "0.3", default-features = false }
