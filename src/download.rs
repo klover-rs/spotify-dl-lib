@@ -3,9 +3,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use anyhow::Result;
 use futures::StreamExt;
 use futures::TryStreamExt;
+use id3::TagLike;
 use indicatif::MultiProgress;
 use indicatif::ProgressBar;
 use indicatif::ProgressState;
@@ -19,6 +21,8 @@ use librespot::playback::mixer::VolumeGetter;
 use librespot::playback::player::Player;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
+use id3::{Tag as id3Tag, Version};
+use metaflac::Tag as FlacTag;
 
 
 use serde::{Serialize, Deserialize};
@@ -27,7 +31,9 @@ use crate::channel_sink::ChannelSink;
 use crate::encoder::Format;
 use crate::encoder::Samples;
 use crate::channel_sink::SinkEvent;
+use crate::track::ArtistMetadata;
 use crate::track::Track;
+use crate::track::TrackMetadata;
 use crate::DownloadState;
 
 
@@ -151,7 +157,7 @@ impl<'a> Downloader<'a> {
             );
         }
 
-        let (sink, mut sink_channel) = ChannelSink::new(metadata);
+        let (sink, mut sink_channel) = ChannelSink::new(metadata.clone());
 
         let file_size = sink.get_approximate_size();
 
@@ -261,6 +267,8 @@ impl<'a> Downloader<'a> {
         tracing::info!("Writing track: {:?} to file: {}", file_name, &path);
         stream.write_to_file(&path).await?;
 
+        self.write_metadata(&metadata, &path)?;
+
         pb.finish_with_message(format!("Downloaded {}", &file_name));
         {
             let mut msg = message.lock().await;
@@ -363,5 +371,56 @@ impl<'a> Downloader<'a> {
             .await.unwrap();
 
         Ok(artist.name)
+    }
+
+    fn write_metadata(&self, track: &TrackMetadata, file: &str) -> Result<()> {
+
+        let file_path = PathBuf::from(file);
+        if !file_path.exists() {
+            return Err(anyhow!("the file doesnt exist!"));
+        }
+
+        let artists = track.artists.clone();
+
+        let album = track.album.clone();
+        let track_name = track.track_name.clone();
+
+        if file_path.extension().unwrap().to_string_lossy().to_string() == "mp3" {
+            let mut tag = id3Tag::new();
+
+            tag.set_album(album.name);
+            tag.set_title(track_name);
+            tag.set_artist(self.convert_artists_to_string(artists)?);
+
+            tag.write_to_path(file_path, Version::Id3v24)?;
+        } else if file_path.extension().unwrap().to_string_lossy().to_string() == "flac" {
+            let mut tag = FlacTag::read_from_path(&file_path)?;
+            tag.set_vorbis("TITLE", vec![track_name]);
+            tag.set_vorbis("ALBUM", vec![album.name]);
+            tag.set_vorbis("ARTIST", vec![self.convert_artists_to_string(artists)?]);
+            tag.save()?;
+        } else {
+            return Err(anyhow!("unsupported file extension!"));
+        }
+
+        Ok(())
+    }
+
+    fn convert_artists_to_string(&self, artists: Vec<ArtistMetadata>) -> Result<String> {
+
+        let mut artists_str = String::new();
+
+        for artist in artists {
+            
+            artists_str.push_str(&artist.name);
+            artists_str.push_str(", ");            
+
+        }
+
+        if !artists_str.is_empty() {
+            artists_str.truncate(artists_str.len() - 2);
+        }
+
+        Ok(artists_str)
     }
 }
