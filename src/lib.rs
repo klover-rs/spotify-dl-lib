@@ -1,9 +1,11 @@
-use std::{fs, path::PathBuf, sync::Arc, time::Duration};
+use std::{fs, path::PathBuf, sync::Arc};
 use anyhow::Result;
-use axum::{extract::{ws::{Message, WebSocket}, WebSocketUpgrade}, response::IntoResponse, routing::get, Router};
 use download::DownloadOptions;
+use futures::SinkExt;
 use librespot::core::session::Session;
 use tokio::sync::{broadcast, Mutex};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+use url::Url;
 
 
 mod session;
@@ -44,51 +46,6 @@ struct DownloadState {
     sender: broadcast::Sender<DownloadStateOpts>
 }
 
-async fn websocket_handler(ws: WebSocketUpgrade, state: Arc<Mutex<DownloadState>>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
-}
-
-async fn handle_socket(mut socket: WebSocket, state: Arc<Mutex<DownloadState>>) {
-    let mut receiver = state.lock().await.sender.subscribe();
-
-    loop {
-        tokio::select! {
-            Some(msg) = socket.recv() => {
-                match msg {
-                    Ok(Message::Text(text)) => {
-                        println!("got message: {}", text);
-                    } 
-                    Ok(Message::Close(_)) => {
-                        println!("client disconnected");
-                        break;
-                    }
-                    Ok(_) => {},
-                    Err(e) => {
-                        println!("websocket e: {}", e);
-                    }
-                }
-            }
-            Ok(message) = receiver.recv() => {
-                match message {
-                    DownloadStateOpts::MessageSender(msg) => {
-                        if socket.send(Message::Text(msg)).await.is_err() {
-                            println!("client disconnected");
-                            break;
-                        }
-                    }
-                    DownloadStateOpts::SocketCloser => {
-                        let _ = socket.send(Message::Close(None)).await;
-                        break;
-                    }
-                    _ => {}
-                }
-                
-               
-            }
-        }
-    }
-}
-
 pub struct SpotifyDownloader {
     output_folder: String,
     session: Session,
@@ -101,31 +58,34 @@ impl SpotifyDownloader {
         output_folder_name: PathBuf, 
         username: &str, 
         password: &str,
+        ws_url: Option<String>
     ) -> Result<Self> {
 
         let output_folder = destination_folder(output_folder_name)?;
 
         let session = create_session(&username, &password).await?;
 
-        let (sender, _receiver) = broadcast::channel(10);
+        let (sender, mut receiver) = broadcast::channel(10);
         
         let state = Arc::new(Mutex::new(DownloadState { sender }));
 
-        let state_clone = Arc::clone(&state);
-        tokio::spawn(async move {
-            let app = Router::new()
-                .route("/send", get({
-                    move |ws| websocket_handler(ws, state_clone)
-                }));
+        if let Some(url) = ws_url {
+            let url = Url::parse(&url)?;
 
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:4040").await.unwrap();
-            axum::serve(listener, app)
-                .with_graceful_shutdown(shutdown_signal())
-                .await
-                .unwrap(); 
+            tokio::task::spawn(async move {
+                let (mut ws_stream, _) = connect_async(url).await.unwrap();
 
-            println!("L");
-        });
+                while let Ok(msg) = receiver.recv().await {
+                    match msg {
+                        DownloadStateOpts::MessageSender(msg) => {
+                            ws_stream.send(Message::Text(msg.into())).await.unwrap();
+                        }
+                        _ => {}
+                    }
+                }
+            });
+
+        }
 
         Ok(Self {
             output_folder,
@@ -162,8 +122,9 @@ impl SpotifyDownloader {
 
         println!("all tracks were downloaded!");
 
-        let mut stop_flag = STOP_FLAG.lock().await;
-        *stop_flag = true;
+        let state = &self.state.lock().await;
+
+        state.sender.send(DownloadStateOpts::SocketCloser)?;
 
         Ok(())
     }
@@ -175,16 +136,3 @@ pub async fn verify_login( username: &str, password: &str) -> Result<()> {
     Ok(())
 }
 
-async fn shutdown_signal() {
-    loop {
-        {
-            let mut stop_flag = STOP_FLAG.lock().await;
-            if *stop_flag {
-                *stop_flag = false;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    println!("Shutdown signal received, initiating shutdown.");
-}
