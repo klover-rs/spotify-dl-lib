@@ -32,7 +32,7 @@ async fn main() {
     let output_folder = PathBuf::from("./spotify-dl-data")
 
     //first argument is the name of the folder, where your mp3 files will be dropped (folder will be created in your home dir)
-    let spotify_dl = SpotifyDownloader::new(&output_folder, &username, &password).await.unwrap();
+    let spotify_dl = SpotifyDownloader::new(&output_folder, &username, &password, Some("ws://127.0.0.1:4040/ws".to_string())).await.unwrap();
 
     //download a playlist, album or track!
     let tracks_to_dl = vec![
